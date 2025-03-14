@@ -5,14 +5,15 @@ from slack_sdk.errors import SlackApiError
 import os
 
 # Customizable Settings
-REACTION_YES = "✅"  # Change this if needed
-REACTION_NO = "❌"   # Change this if needed
-REMINDER_INTERVAL = 30  # Interval time in minutes (Changeable)
+REACTION_YES = "white_check_mark"  # ✅ in Slack reaction name format
+REACTION_NO = "x"  # ❌ in Slack reaction name format
+REMINDER_INTERVAL = 30  # Interval in minutes for reminders
 
-# Slack Credentials (Set these in Railway.app environment variables)
+# Slack Credentials (Set these in Railway.app or Render environment variables)
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 
+# Initialize Slack Client
 client = WebClient(token=SLACK_BOT_TOKEN)
 
 # Dictionary to track users who haven't responded
@@ -28,7 +29,10 @@ def send_reminder_message():
         message_ts = response["ts"]  # Get the message timestamp to track reactions
         pending_users[message_ts] = []  # Store users who haven't responded
         print(f"Reminder sent at {message_ts}")
+
+        # Schedule response check after REMINDER_INTERVAL
         schedule.every(REMINDER_INTERVAL).minutes.do(check_responses, message_ts).tag(message_ts)
+
     except SlackApiError as e:
         print(f"Error sending message: {e.response['error']}")
 
@@ -46,7 +50,8 @@ def check_responses(message_ts):
         members = client.conversations_members(channel=CHANNEL_ID)["members"]
 
         # Find users who haven't reacted
-        users_to_remind = set(members) - users_who_reacted - {client.auth_test()["user_id"]}
+        bot_id = client.auth_test()["user_id"]  # Get bot user ID
+        users_to_remind = set(members) - users_who_reacted - {bot_id}
 
         if users_to_remind:
             for user in users_to_remind:
@@ -61,12 +66,13 @@ def send_dm_reminder(user_id):
     """ Sends a direct message reminder to the user. """
     try:
         current_hour = int(time.strftime("%H"))
-        reminder_text = "⏰ You still haven’t punched in. Please do it now!" if current_hour < 19 else "⏰ You still haven’t punched out. Please do it now!"
-
-        client.chat_postMessage(
-            channel=user_id,
-            text=reminder_text
+        reminder_text = (
+            "⏰ You still haven’t punched in. Please do it now!" 
+            if current_hour < 19 else 
+            "⏰ You still haven’t punched out. Please do it now!"
         )
+
+        client.chat_postMessage(channel=user_id, text=reminder_text)
         print(f"Reminder sent to {user_id}")
 
     except SlackApiError as e:
@@ -84,7 +90,7 @@ schedule.every().thursday.at("19:00").do(send_reminder_message)
 schedule.every().friday.at("10:00").do(send_reminder_message)
 schedule.every().friday.at("19:00").do(send_reminder_message)
 
-# Keep the script running
+# Keep the script running (for Render Background Worker)
 while True:
     schedule.run_pending()
     time.sleep(60)
